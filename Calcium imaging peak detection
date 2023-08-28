@@ -1,0 +1,92 @@
+%%- this indicates a new cell in the IDE
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from scipy import signal
+from scipy.signal import butter, lfilter, filtfilt
+%%
+
+%matplotlib inline
+file = np.load(r"your_file_name")
+s_f=your_sampling_frequency
+file = file[:,86:] #this is not needed but in case there is noise at the beginning of the recording, this will truncate that bit. need to set the number after visual inspectioon of data.
+time = file[0]
+timeScale=np.linspace(0, len(time)/s_f, num=len(time))
+freq = 1/np.mean(np.diff(timeScale))
+plt.plot(timeScale, file[0]) #ROI tht we want for this recording
+%%
+
+start_base = []    #Define the start and end values of the region whose average fluorescence will be considered as the baseline fluorescence.
+end_base =[]       #These values could be different for each signal and need to be determined after visual inspection of the plot.
+%%
+
+def delta_ff(array, base_start, base_end):
+    cell = array
+    baseline = np.mean(cell[base_start:base_end])
+    delta_ff_values = ((cell - baseline) / baseline)
+    base = np.mean(delta_ff_values[base_start:base_end])
+    return np.array(delta_ff_values), base               # perfrom delta F/F on the signal 'array'
+
+def clc_filter_rectified(clc_signal):
+    cell = clc_signal
+    time=np.linspace(0, len(cell)/s_f, num=len(cell))
+    freq = 1/np.mean(np.diff(time))
+    #Filtering the raw data
+    b, a = butter(2, ([1, 4]/(freq/2)), btype='bandpass')
+    dataf_pre = filtfilt(b,a,cell)
+    absSignal = np.absolute(dataf_pre)
+    clc_final = absSignal
+    return clc_final                                    # this function returns a signal that is butterworth filtered and rectified
+
+def clc_filter_mask(array, level_smoothing):
+    lowp = level_smoothing
+    sfreq = s_f
+    low_pass = lowp/sfreq
+    b, a = butter(2, low_pass, btype='lowpass')
+    datafrle = filtfilt(b, a, array)
+    signal = datafrle*3
+    return np.array(signal)                             #Create a mask/copy of the filtered signal, this mask is going to be used for find the peaks and valleys
+%%
+
+def peaks_neurons_file(file_name, smooth_level, start, end, sf):
+    dic_peaks = {}
+    frequencies = []
+   
+    for i in range(len(file_name)):
+        neuron = file_name[i]
+        time = np.linspace(0, len(neuron) / sf, num=len(neuron))  # Create a time array for the current neuron
+   
+        array_filtered = clc_filter_rectified(neuron)
+       
+        delt, base = delta_ff(array_filtered, start[i], end[i])
+       
+        mask = clc_filter_mask(delt, smooth_level)
+        threshold = (np.max(mask) - base)/3 #arbitrary threshold that may need to be changed manually depending on the plot.
+
+        peaks, _ = signal.find_peaks(mask, height=threshold)
+
+# Create a new figure for each iteration
+        plt.figure()
+       
+        plt.plot(time, mask, color="grey")
+        plt.scatter(time[peaks], mask[peaks], color="r")
+        plt.xlabel('Time')
+        plt.ylabel('Filtered Signal')
+        plt.title(f'Neuron {i+1} - Filtered Signal and Peaks')
+        plt.show()
+       
+        freq = (len(peaks) / (len(neuron) / sf))
+       
+        dic_peaks[i] = peaks
+        frequencies.append(freq)
+       
+    return dic_peaks, frequencies
+
+%%
+
+final = peaks_neurons_file(file, 4, start_base, end_base, 22)
+%%
+
+final[0] #prints the peak values
+final[1] #prints the value of frequencies
